@@ -1,0 +1,6 @@
+selenium
+pytest
+python-dotenv
+mailslurp-client
+beautifulsoup4
+webdriver-manager
