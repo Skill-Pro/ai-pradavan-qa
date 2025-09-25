@@ -1,35 +1,47 @@
+# conftest.py
 import os
 import pytest
-import pytest_html
+from pytest_html import extras
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# 🔹 Название отчёта
 def pytest_html_report_title(report):
-    report.title = "Отчёт по тестированию логина"
-# 🔹 Фиксация скриншота при падении теста
+    report.title = "Отчёт по тестированию (UI + API)"
+
+@pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    if call.when == "call" and call.excinfo is not None:
-        screenshot_dir = "screenshots"
-        if not os.path.exists(screenshot_dir):
-            os.makedirs(screenshot_dir)
+    outcome = yield
+    rep = outcome.get_result()
 
-        screenshot_path = os.path.join(screenshot_dir, f"{item.name}.png")
-        driver = item.funcargs.get("driver")
+    if rep.when != "call":
+        return
+
+    rep.extra = getattr(rep, "extra", [])
+
+    # 🔹 Добавляем API Response и в "Extra", и в "Captured log"
+    response_info = getattr(item, "response_info", None)
+    if response_info:
+        # В "Links"
+        rep.extra.append(extras.text(response_info, name="API Response"))
+        # В основной лог (чтобы не было пусто «No log output captured»)
+        rep.sections.append(("api response", response_info))
+
+    # 🔹 Скриншот для UI-тестов
+    if rep.failed:
+        driver = item.funcargs.get("driver", None)
         if driver:
+            screenshot_dir = "/screenshots"
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(screenshot_dir, f"{item.name}.png")
             driver.save_screenshot(screenshot_path)
+            rep.extra.append(extras.image(screenshot_path))
 
-        extra = getattr(item.config, "extra", [])
-        extra.append(pytest_html.extras.image(screenshot_path))
-        setattr(item.config, "extra", extra)
-
-# 🔹 Фикстура браузера для тестов
 @pytest.fixture
 def driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
-    # options.add_argument("--headless")  # Убери комментарий, если хочешь запуск без окна
+    # options.add_argument("--headless")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     yield driver
     driver.quit()
