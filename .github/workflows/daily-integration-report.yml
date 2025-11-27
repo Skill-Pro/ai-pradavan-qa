@@ -1,0 +1,38 @@
+name: Daily Integration Report
+
+on:
+  schedule:
+    # каждый день в 06:00 UTC (≈ 11:00 по Алматы)
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+  # workflow_dispatch — позволяет запускать руками
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Create service_account.json and client_data.txt
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          CLIENT_DATA: ${{ secrets.CLIENT_DATA }}
+        run: |
+          mkdir -p integration_check_for_clients
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > integration_check_for_clients/service_account.json
+          printf '%s' "$CLIENT_DATA" > integration_check_for_clients/client_data.txt
+
+      - name: Run daily report
+        run: |
+          python run_daily_report.py
