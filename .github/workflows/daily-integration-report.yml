@@ -1,11 +1,13 @@
-name: Daily Integration Report
+name: Integration Report (Every 30 min)
 
 on:
   schedule:
-    # каждый день в 06:00 UTC (≈ 11:00 по Алматы)
-    - cron: "0 6 * * *"
+    - cron: "*/30 * * * *"   # каждые 30 минут (время по UTC)
   workflow_dispatch: {}
-  # workflow_dispatch — позволяет запускать руками
+
+concurrency:
+  group: integration-report
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -19,9 +21,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Create service_account.json and client_data.txt
@@ -33,6 +37,6 @@ jobs:
           printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > integration_check_for_clients/service_account.json
           printf '%s' "$CLIENT_DATA" > integration_check_for_clients/client_data.txt
 
-      - name: Run daily report
+      - name: Run report
         run: |
           python run_daily_report.py
