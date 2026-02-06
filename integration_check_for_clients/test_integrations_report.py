@@ -30,6 +30,8 @@ INTEGRATION_ENDPOINTS = {
     "whatsapp_business": "/api/v1/integrations/whatsapp",
     "whatsapp_web": "/api/v1/integrations/whatsapp_web/status",
     "instagram": "/api/v1/integrations/instagram/status",
+    "waha": "/api/v1/integrations/waha/status",
+    "wazzup": "/api/v1/integrations/wazzup/status",
 }
 
 # ===============================
@@ -212,8 +214,8 @@ def extract_identifier_from_message(integration_name: str, message: str | None) 
         if ":" in msg:
             return msg.split(":", 1)[1].strip()
 
-    # WhatsApp
-    if "whatsapp" in lower_name:
+    # WhatsApp (включая WAHA/WAZZUP)
+    if "whatsapp" in lower_name or "waha" in lower_name or "wazzup" in lower_name:
         # из строки оставляем цифры и +/пробел
         clean = "".join(ch for ch in msg if ch.isdigit() or ch in "+ ")
         clean = clean.strip()
@@ -292,6 +294,8 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         "Telegram-Web",
         "WhatsApp Business",
         "WhatsApp-Web",
+        "WAHA",
+        "WAZZUP",
         "Instagram",
         "Статус",
     ]
@@ -382,8 +386,9 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         values.append(headers)
         for idx, row in enumerate(custom_rows, 1):
             # Определяем статус
-            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""), 
-                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""), 
+            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""),
+                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""),
+                       row.get("WAHA", ""), row.get("WAZZUP", ""),
                        row.get("Instagram", "")]
             if "❌" in statuses:
                 status = "⚠️ Есть проблемы"
@@ -400,6 +405,8 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
                 row.get("Telegram-Web", ""),
                 row.get("WhatsApp Business", ""),
                 row.get("WhatsApp-Web", ""),
+                row.get("WAHA", ""),
+                row.get("WAZZUP", ""),
                 row.get("Instagram", ""),
                 status,
             ])
@@ -412,8 +419,9 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         values.append(headers)
         for idx, row in enumerate(platform_rows, 1):
             # Определяем статус
-            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""), 
-                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""), 
+            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""),
+                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""),
+                       row.get("WAHA", ""), row.get("WAZZUP", ""),
                        row.get("Instagram", "")]
             if "❌" in statuses:
                 status = "⚠️ Есть проблемы"
@@ -430,6 +438,8 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
                 row.get("Telegram-Web", ""),
                 row.get("WhatsApp Business", ""),
                 row.get("WhatsApp-Web", ""),
+                row.get("WAHA", ""),
+                row.get("WAZZUP", ""),
                 row.get("Instagram", ""),
                 status,
             ])
@@ -494,6 +504,8 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
             "Telegram-Web": "❌",
             "WhatsApp Business": "❌",
             "WhatsApp-Web": "❌",
+            "WAHA": "❌",
+            "WAZZUP": "❌",
             "Instagram": "❌",
             "Комментарий": comment,
         }
@@ -520,12 +532,20 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
     instagram_emoji, instagram_status, instagram_msg = check_integration(
         INTEGRATION_ENDPOINTS["instagram"], headers
     )
+    waha_emoji, waha_status, waha_msg = check_integration(
+        INTEGRATION_ENDPOINTS["waha"], headers
+    )
+    wazzup_emoji, wazzup_status, wazzup_msg = check_integration(
+        INTEGRATION_ENDPOINTS["wazzup"], headers
+    )
 
     comment_lines = [
         build_integration_comment("Telegram", telegram_emoji, telegram_status, telegram_msg),
         build_integration_comment("Telegram-Web", telegram_web_emoji, telegram_web_status, telegram_web_msg),
         build_integration_comment("WhatsApp Business", whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg),
         build_integration_comment("WhatsApp Web", whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg),
+        build_integration_comment("WAHA", waha_emoji, waha_status, waha_msg),
+        build_integration_comment("WAZZUP", wazzup_emoji, wazzup_status, wazzup_msg),
         build_integration_comment("Instagram", instagram_emoji, instagram_status, instagram_msg),
     ]
     comment = "\n".join(comment_lines)
@@ -538,6 +558,8 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
         "Telegram-Web": telegram_web_emoji,
         "WhatsApp Business": whatsapp_business_emoji,
         "WhatsApp-Web": whatsapp_web_emoji,
+        "WAHA": waha_emoji,
+        "WAZZUP": wazzup_emoji,
         "Instagram": instagram_emoji,
         "Комментарий": comment,
     }
@@ -552,6 +574,10 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
         problems["WhatsApp Business"] = whatsapp_business_msg or "ошибка"
     if whatsapp_web_emoji == "❌":
         problems["WhatsApp-Web"] = whatsapp_web_msg or "ошибка"
+    if waha_emoji == "❌":
+        problems["WAHA"] = waha_msg or "ошибка"
+    if wazzup_emoji == "❌":
+        problems["WAZZUP"] = wazzup_msg or "ошибка"
     if instagram_emoji == "❌":
         problems["Instagram"] = instagram_msg or "ошибка"
     
