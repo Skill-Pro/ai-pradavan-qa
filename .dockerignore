@@ -1,0 +1,17 @@
+# .dockerignore
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+*.md
+reports/
+logs/
+screenshots/
+chromedriver-win64/
+.env
+.venv/
+venv/
+*.log
+.idea/
+.vscode/

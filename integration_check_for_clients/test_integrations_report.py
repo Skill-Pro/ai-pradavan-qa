@@ -22,7 +22,7 @@ REPORTS_DIR = Path(__file__).parent.parent / "integration_check_for_clients" / "
 
 SERVICE_ACCOUNT_FILE = Path(__file__).parent / "service_account.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SPREADSHEET_ID = "11cMzX2cGjaFD-BX9_kdibhUjjvnQMUTyJvWUABKKPKE"  # <-- обязательно замени
+SPREADSHEET_ID = "17Z5CGL5kI3b-5R2mRF8R3rRUbZkwDdhuY1kaAcWWKfs"
 
 INTEGRATION_ENDPOINTS = {
     "telegram": "/api/v1/integrations/telegram",
@@ -36,22 +36,45 @@ INTEGRATION_ENDPOINTS = {
 # 🔹 Вспомогательные функции
 # ===============================
 
-def load_clients() -> List[Tuple[str, str, str]]:
+def load_clients() -> Dict[str, List[Tuple[str, str, str]]]:
+    """
+    Загружает клиентов из файла с разделением по категориям.
+    
+    Returns:
+        Dict с ключами 'КАСТОМНЫЕ' и 'ПЛАТФОРМА', значения — списки (имя, логин, пароль)
+    """
     if not CLIENT_DATA_PATH.exists():
         raise FileNotFoundError(f"Файл с клиентами не найден: {CLIENT_DATA_PATH}")
 
-    clients: List[Tuple[str, str, str]] = []
+    clients: Dict[str, List[Tuple[str, str, str]]] = {
+        "КАСТОМНЫЕ": [],
+        "ПЛАТФОРМА": []
+    }
+    current_category = "КАСТОМНЫЕ"  # по умолчанию
+    
     with CLIENT_DATA_PATH.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#"):
+            if not line:
                 continue
+            
+            # Проверяем маркеры категорий
+            if line.startswith("# КАСТОМНЫЕ"):
+                current_category = "КАСТОМНЫЕ"
+                continue
+            elif line.startswith("# ПЛАТФОРМА"):
+                current_category = "ПЛАТФОРМА"
+                continue
+            elif line.startswith("#"):
+                continue
+            
             parts = [p.strip() for p in line.split(",")]
             if len(parts) < 3:
                 print(f"⚠️ Пропущена строка (ожидалось 3 колонки): {line}")
                 continue
             client_name, login, password = parts[0], parts[1], parts[2]
-            clients.append((client_name, login, password))
+            clients[current_category].append((client_name, login, password))
+    
     return clients
 
 
@@ -252,174 +275,183 @@ def get_sheets_service():
     return service
 
 
-def write_report(rows: List[Dict[str, Any]]):
+def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str, Any]]):
     """
-    Пишет отчет в Google Sheets:
-    - новый лист на каждый запуск
-    - цветная шапка, зебра-строки
-    - цвета по статусам (✅ зелёный, ❌ красный, — серый)
+    Пишет отчет в Google Sheets во вкладку "Статусы YYYY-MM-DD":
+    - отдельная вкладка на каждый день
+    - разделение на секции КАСТОМНЫЕ и ПЛАТФОРМА
+    - данные добавляются блоками с указанием времени
     """
     ensure_reports_dir()
 
     headers = [
-        "название клиент",
+        "№",
+        "Клиент",
         "Логин",
-        "Пароль",
         "Telegram",
         "Telegram-Web",
-        "WhatsApp Busine",
+        "WhatsApp Business",
         "WhatsApp-Web",
         "Instagram",
-        "Комментарий",
+        "Статус",
     ]
 
-    values: List[List[Any]] = [headers]
-
-    for row in rows:
-        values.append([
-            row.get("Название клиента", ""),
-            row.get("Логин", ""),
-            row.get("Пароль", ""),
-            row.get("Telegram", ""),
-            row.get("Telegram-Web", ""),
-            row.get("WhatsApp Business", ""),
-            row.get("WhatsApp-Web", ""),
-            row.get("Instagram", ""),
-            row.get("Комментарий", ""),
-        ])
-
-    # Легенда
-    values.append([])
-    values.append([
-        "Легенда:",
-        "",
-        "",
-        "✅ — работает"
-        "❌ — работает некорректно / не отвечает",
-        "— — интеграции нет / не настроено, возможно баг",
-        "",
-        "",
-        "",
-    ])
-
     service = get_sheets_service()
-
-    sheet_title = datetime.now().strftime("Отчет %Y-%m-%d %H:%M")
-
-    # 1) создаём новый лист
-    add_sheet_body = {
-        "requests": [
-            {
-                "addSheet": {
-                    "properties": {
-                        "title": sheet_title,
-                        "gridProperties": {
-                            "rowCount": len(values) + 20,
-                            "columnCount": len(headers)
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    current_time = datetime.now().strftime("%H:%M")
+    
+    # Название вкладки = "Статусы" + дата
+    sheet_name = f"Статусы {today}"
+    
+    # Проверяем, существует ли вкладка
+    spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    sheets = spreadsheet.get("sheets", [])
+    
+    sheet_exists = False
+    sheet_id = None
+    
+    for sheet in sheets:
+        if sheet["properties"]["title"] == sheet_name:
+            sheet_exists = True
+            sheet_id = sheet["properties"]["sheetId"]
+            break
+    
+    # Если вкладки нет — создаём
+    if not sheet_exists:
+        add_sheet_body = {
+            "requests": [
+                {
+                    "addSheet": {
+                        "properties": {
+                            "title": sheet_name,
+                            "gridProperties": {
+                                "rowCount": 5000,
+                                "columnCount": len(headers)
+                            }
                         }
                     }
                 }
-            }
+            ]
+        }
+        add_sheet_response = service.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body=add_sheet_body
+        ).execute()
+        sheet_id = add_sheet_response["replies"][0]["addSheet"]["properties"]["sheetId"]
+        
+        # Добавляем заголовок и легенду в самый верх
+        legend = [
+            [f"📊 Мониторинг интеграций | {today}"],
+            [""],
+            ["Легенда: ✅ работает | ❌ ошибка/не отвечает | — нет интеграции"],
+            [""],
         ]
-    }
-
-    add_sheet_response = service.spreadsheets().batchUpdate(
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{sheet_name}'!A1",
+            valueInputOption="RAW",
+            body={"values": legend}
+        ).execute()
+    
+    # Получаем текущее количество строк
+    result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        body=add_sheet_body
+        range=f"'{sheet_name}'!A:A"
     ).execute()
-
-    sheet_id = add_sheet_response["replies"][0]["addSheet"]["properties"]["sheetId"]
-
-    # 2) записываем данные
-    range_all = f"'{sheet_title}'!A1"
+    existing_rows = len(result.get("values", []))
+    
+    # Формируем блок данных
+    values: List[List[Any]] = []
+    
+    # Временная метка
+    values.append([""])
+    values.append([f"════════════════════════════════════════════════════════"])
+    values.append([f"⏰ ПРОВЕРКА В {current_time}"])
+    values.append([f"════════════════════════════════════════════════════════"])
+    values.append([""])
+    
+    # Подсчет статистики
+    total_custom = len(custom_rows)
+    total_platform = len(platform_rows)
+    
+    # --- КАСТОМНЫЕ ---
+    if custom_rows:
+        problems_custom = sum(1 for r in custom_rows if "❌" in str(r.values()))
+        values.append([f"📦 КАСТОМНЫЕ РЕШЕНИЯ ({total_custom} клиентов, проблем: {problems_custom})"])
+        values.append(headers)
+        for idx, row in enumerate(custom_rows, 1):
+            # Определяем статус
+            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""), 
+                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""), 
+                       row.get("Instagram", "")]
+            if "❌" in statuses:
+                status = "⚠️ Есть проблемы"
+            elif all(s == "✅" for s in statuses if s):
+                status = "✅ Всё работает"
+            else:
+                status = "ℹ️ Частично"
+            
+            values.append([
+                idx,
+                row.get("Название клиента", ""),
+                row.get("Логин", ""),
+                row.get("Telegram", ""),
+                row.get("Telegram-Web", ""),
+                row.get("WhatsApp Business", ""),
+                row.get("WhatsApp-Web", ""),
+                row.get("Instagram", ""),
+                status,
+            ])
+        values.append([""])
+    
+    # --- ПЛАТФОРМА ---
+    if platform_rows:
+        problems_platform = sum(1 for r in platform_rows if "❌" in str(r.values()))
+        values.append([f"🌐 ПЛАТФОРМА ({total_platform} клиентов, проблем: {problems_platform})"])
+        values.append(headers)
+        for idx, row in enumerate(platform_rows, 1):
+            # Определяем статус
+            statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""), 
+                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""), 
+                       row.get("Instagram", "")]
+            if "❌" in statuses:
+                status = "⚠️ Есть проблемы"
+            elif all(s == "✅" for s in statuses if s):
+                status = "✅ Всё работает"
+            else:
+                status = "ℹ️ Частично"
+            
+            values.append([
+                idx,
+                row.get("Название клиента", ""),
+                row.get("Логин", ""),
+                row.get("Telegram", ""),
+                row.get("Telegram-Web", ""),
+                row.get("WhatsApp Business", ""),
+                row.get("WhatsApp-Web", ""),
+                row.get("Instagram", ""),
+                status,
+            ])
+    
+    values.append([""])
+    
+    # Записываем данные
+    start_row = existing_rows + 1
+    range_to_write = f"'{sheet_name}'!A{start_row}"
+    
     service.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
-        range=range_all,
+        range=range_to_write,
         valueInputOption="RAW",
         body={"values": values}
     ).execute()
-
-    num_data_rows = len(rows)
+    
+    # Оформление
     num_columns = len(headers)
-
-    # 3) оформление
     requests_body: List[Dict[str, Any]] = []
-
-    # 3.1. Шапка
-    requests_body.append({
-        "repeatCell": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": 0,
-                "endRowIndex": 1,
-                "startColumnIndex": 0,
-                "endColumnIndex": num_columns,
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "backgroundColor": {"red": 0.75, "green": 0.85, "blue": 0.95},
-                    "horizontalAlignment": "CENTER",
-                    "verticalAlignment": "MIDDLE",
-                    "textFormat": {"bold": True},
-                }
-            },
-            "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat.bold)"
-        }
-    })
-
-    # 3.2. Закрепить первую строку
-    requests_body.append({
-        "updateSheetProperties": {
-            "properties": {
-                "sheetId": sheet_id,
-                "gridProperties": {
-                    "frozenRowCount": 1
-                }
-            },
-            "fields": "gridProperties.frozenRowCount"
-        }
-    })
-
-    # 3.3. Перенос строк
-    requests_body.append({
-        "repeatCell": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": 1,
-                "endRowIndex": 1 + num_data_rows + 3,
-                "startColumnIndex": 0,
-                "endColumnIndex": num_columns,
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "wrapStrategy": "WRAP"
-                }
-            },
-            "fields": "userEnteredFormat.wrapStrategy"
-        }
-    })
-
-    # 3.4. Зебра-строки (полоски)
-    if num_data_rows > 0:
-        requests_body.append({
-            "addBanding": {
-                "bandedRange": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 1,
-                        "endRowIndex": 1 + num_data_rows,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": num_columns,
-                    },
-                    "rowProperties": {
-                        "firstBandColor": {"red": 0.98, "green": 0.98, "blue": 0.98},
-                        "secondBandColor": {"red": 0.93, "green": 0.96, "blue": 1.0},
-                    }
-                }
-            }
-        })
-
-    # 3.5. Автоширина колонок
+    
+    # Автоширина колонок
     requests_body.append({
         "autoResizeDimensions": {
             "dimensions": {
@@ -430,159 +462,185 @@ def write_report(rows: List[Dict[str, Any]]):
             }
         }
     })
-
-    # 3.6. Условное форматирование: ✅ зелёный, ❌ красный, — серый
-    if num_data_rows > 0:
-        status_range = {
-            "sheetId": sheet_id,
-            "startRowIndex": 1,
-            "endRowIndex": 1 + num_data_rows,
-            "startColumnIndex": 3,  # D
-            "endColumnIndex": 8,  # H
-        }
-
-        # ✅
-        requests_body.append({
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [status_range],
-                    "booleanRule": {
-                        "condition": {
-                            "type": "TEXT_EQ",
-                            "values": [{"userEnteredValue": "✅"}]
-                        },
-                        "format": {
-                            "backgroundColor": {"red": 0.80, "green": 0.94, "blue": 0.80}
-                        }
-                    }
-                },
-                "index": 0
-            }
-        })
-
-        # ❌
-        requests_body.append({
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [status_range],
-                    "booleanRule": {
-                        "condition": {
-                            "type": "TEXT_EQ",
-                            "values": [{"userEnteredValue": "❌"}]
-                        },
-                        "format": {
-                            "backgroundColor": {"red": 0.98, "green": 0.80, "blue": 0.80}
-                        }
-                    }
-                },
-                "index": 0
-            }
-        })
-
-        # —
-        requests_body.append({
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [status_range],
-                    "booleanRule": {
-                        "condition": {
-                            "type": "TEXT_EQ",
-                            "values": [{"userEnteredValue": "—"}]
-                        },
-                        "format": {
-                            "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93}
-                        }
-                    }
-                },
-                "index": 0
-            }
-        })
-
+    
     if requests_body:
         service.spreadsheets().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={"requests": requests_body}
         ).execute()
 
-    print("\n✅ Отчет по интеграциям сохранен в Google Sheets:")
+    print(f"\n✅ Отчет добавлен в Google Sheets:")
     print(f"   https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}")
-    print(f"   Лист: {sheet_title}")
-    print("\nЛегенда:")
-    print("  ✅ — работает корректно")
-    print("  ❌ — работает некорректно / не отвечает")
-    print("  —  — интеграции нет / не настроено, возможно баг")
+    print(f"   Вкладка: {sheet_name} | Время: {current_time}")
 
 
 # ===============================
 # 🔹 Один общий тест
 # ===============================
 
-@pytest.mark.integration
-def test_integration_status_report():
-    clients = load_clients()
-    total = len(clients)
-    assert total > 0, "Нет ни одного клиента в client_data.txt"
+def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str, Any], Dict[str, Any] | None]:
+    """
+    Проверяет одного клиента и возвращает (row, problem или None)
+    """
+    headers, login_error = get_auth_headers(login, password)
 
-    report_rows: List[Dict[str, Any]] = []
-
-    for idx, (client_name, login, password) in enumerate(clients, start=1):
-        print(f"[{idx}/{total}] Проверяю клиента: {client_name} ({login})")
-
-        headers, login_error = get_auth_headers(login, password)
-
-        if headers is None:
-            comment = "Ошибка логина: " + (login_error or "")
-            row = {
-                "Название клиента": client_name,
-                "Логин": login,
-                "Пароль": password,
-                "Telegram": "❌",
-                "Telegram-Web": "❌",
-                "WhatsApp Business": "❌",
-                "WhatsApp-Web": "❌",
-                "Instagram": "❌",
-                "Комментарий": comment,
-            }
-            report_rows.append(row)
-            continue
-
-        telegram_emoji, telegram_status, telegram_msg = check_integration(
-            INTEGRATION_ENDPOINTS["telegram"], headers
-        )
-        telegram_web_emoji, telegram_web_status, telegram_web_msg = check_integration(
-            INTEGRATION_ENDPOINTS["telegram_web"], headers
-        )
-        whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg = check_integration(
-            INTEGRATION_ENDPOINTS["whatsapp_business"], headers
-        )
-        whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg = check_integration(
-            INTEGRATION_ENDPOINTS["whatsapp_web"], headers
-        )
-        instagram_emoji, instagram_status, instagram_msg = check_integration(
-            INTEGRATION_ENDPOINTS["instagram"], headers
-        )
-
-        comment_lines = [
-            build_integration_comment("Telegram", telegram_emoji, telegram_status, telegram_msg),
-            build_integration_comment("Telegram-Web", telegram_web_emoji, telegram_web_status, telegram_web_msg),
-            build_integration_comment("WhatsApp Business", whatsapp_business_emoji, whatsapp_business_status,
-                                      whatsapp_business_msg),
-            build_integration_comment("WhatsApp Web", whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg),
-            build_integration_comment("Instagram", instagram_emoji, instagram_status, instagram_msg),
-        ]
-        comment = "\n".join(comment_lines)
-
+    if headers is None:
+        comment = "Ошибка логина: " + (login_error or "")
         row = {
             "Название клиента": client_name,
             "Логин": login,
             "Пароль": password,
-            "Telegram": telegram_emoji,
-            "Telegram-Web": telegram_web_emoji,
-            "WhatsApp Business": whatsapp_business_emoji,
-            "WhatsApp-Web": whatsapp_web_emoji,
-            "Instagram": instagram_emoji,
+            "Telegram": "❌",
+            "Telegram-Web": "❌",
+            "WhatsApp Business": "❌",
+            "WhatsApp-Web": "❌",
+            "Instagram": "❌",
             "Комментарий": comment,
         }
-        report_rows.append(row)
+        problem = {
+            "name": client_name,
+            "login": login,
+            "problems": {"Авторизация": "Ошибка логина"},
+            "comment": comment
+        }
+        return row, problem
 
-    write_report(report_rows)
+    telegram_emoji, telegram_status, telegram_msg = check_integration(
+        INTEGRATION_ENDPOINTS["telegram"], headers
+    )
+    telegram_web_emoji, telegram_web_status, telegram_web_msg = check_integration(
+        INTEGRATION_ENDPOINTS["telegram_web"], headers
+    )
+    whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg = check_integration(
+        INTEGRATION_ENDPOINTS["whatsapp_business"], headers
+    )
+    whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg = check_integration(
+        INTEGRATION_ENDPOINTS["whatsapp_web"], headers
+    )
+    instagram_emoji, instagram_status, instagram_msg = check_integration(
+        INTEGRATION_ENDPOINTS["instagram"], headers
+    )
+
+    comment_lines = [
+        build_integration_comment("Telegram", telegram_emoji, telegram_status, telegram_msg),
+        build_integration_comment("Telegram-Web", telegram_web_emoji, telegram_web_status, telegram_web_msg),
+        build_integration_comment("WhatsApp Business", whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg),
+        build_integration_comment("WhatsApp Web", whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg),
+        build_integration_comment("Instagram", instagram_emoji, instagram_status, instagram_msg),
+    ]
+    comment = "\n".join(comment_lines)
+
+    row = {
+        "Название клиента": client_name,
+        "Логин": login,
+        "Пароль": password,
+        "Telegram": telegram_emoji,
+        "Telegram-Web": telegram_web_emoji,
+        "WhatsApp Business": whatsapp_business_emoji,
+        "WhatsApp-Web": whatsapp_web_emoji,
+        "Instagram": instagram_emoji,
+        "Комментарий": comment,
+    }
+
+    # Проверяем на проблемы (❌)
+    problems = {}
+    if telegram_emoji == "❌":
+        problems["Telegram"] = telegram_msg or "ошибка"
+    if telegram_web_emoji == "❌":
+        problems["Telegram-Web"] = telegram_web_msg or "ошибка"
+    if whatsapp_business_emoji == "❌":
+        problems["WhatsApp Business"] = whatsapp_business_msg or "ошибка"
+    if whatsapp_web_emoji == "❌":
+        problems["WhatsApp-Web"] = whatsapp_web_msg or "ошибка"
+    if instagram_emoji == "❌":
+        problems["Instagram"] = instagram_msg or "ошибка"
+    
+    problem = None
+    if problems:
+        problem = {
+            "name": client_name,
+            "login": login,
+            "problems": problems,
+            "comment": comment
+        }
+    
+    return row, problem
+
+
+@pytest.mark.integration
+def test_integration_status_report():
+    """Pytest-тест для проверки интеграций"""
+    clients_by_category = load_clients()
+    
+    custom_clients = clients_by_category.get("КАСТОМНЫЕ", [])
+    platform_clients = clients_by_category.get("ПЛАТФОРМА", [])
+    total = len(custom_clients) + len(platform_clients)
+    
+    assert total > 0, "Нет ни одного клиента в client_data.txt"
+
+    custom_rows: List[Dict[str, Any]] = []
+    platform_rows: List[Dict[str, Any]] = []
+    
+    idx = 0
+    
+    # Проверяем кастомных
+    for client_name, login, password in custom_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login})")
+        row, _ = check_client(client_name, login, password)
+        custom_rows.append(row)
+    
+    # Проверяем платформенных
+    for client_name, login, password in platform_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login})")
+        row, _ = check_client(client_name, login, password)
+        platform_rows.append(row)
+
+    write_report(custom_rows, platform_rows)
+
+
+def run_integration_check() -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    Запускает проверку интеграций и возвращает результаты.
+    
+    Returns:
+        tuple: (custom_rows, platform_rows, problem_clients)
+    """
+    clients_by_category = load_clients()
+    
+    custom_clients = clients_by_category.get("КАСТОМНЫЕ", [])
+    platform_clients = clients_by_category.get("ПЛАТФОРМА", [])
+    total = len(custom_clients) + len(platform_clients)
+    
+    if total == 0:
+        print("⚠️ Нет ни одного клиента в client_data.txt")
+        return [], [], []
+
+    custom_rows: List[Dict[str, Any]] = []
+    platform_rows: List[Dict[str, Any]] = []
+    problem_clients: List[Dict[str, Any]] = []
+    
+    idx = 0
+    
+    # Проверяем кастомных
+    for client_name, login, password in custom_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login})")
+        row, problem = check_client(client_name, login, password)
+        custom_rows.append(row)
+        if problem:
+            problem_clients.append(problem)
+    
+    # Проверяем платформенных
+    for client_name, login, password in platform_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login})")
+        row, problem = check_client(client_name, login, password)
+        platform_rows.append(row)
+        if problem:
+            problem_clients.append(problem)
+
+    write_report(custom_rows, platform_rows)
+    
+    return custom_rows, platform_rows, problem_clients
