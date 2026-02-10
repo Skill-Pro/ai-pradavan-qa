@@ -35,6 +35,33 @@ INTEGRATION_ENDPOINTS = {
 }
 
 # ===============================
+# 🔹 Telegram уведомления
+# ===============================
+
+def tg_send(text: str) -> None:
+    """
+    Отправляет сообщение в Telegram канал.
+    Требует переменные окружения TG_BOT_TOKEN и TG_CHAT_ID.
+    """
+    token = os.getenv("TG_BOT_TOKEN")
+    chat_id = os.getenv("TG_CHAT_ID")
+
+    if not token or not chat_id:
+        print("⚠️ TG_BOT_TOKEN / TG_CHAT_ID не заданы — Telegram пропущен")
+        return
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        requests.post(
+            url,
+            json={"chat_id": chat_id, "text": text},
+            timeout=15
+        )
+        print("✅ Telegram уведомление отправлено")
+    except Exception as e:
+        print(f"⚠️ Ошибка отправки в Telegram: {e}")
+
+# ===============================
 # 🔹 Вспомогательные функции
 # ===============================
 
@@ -668,5 +695,18 @@ def run_integration_check() -> tuple[list[dict], list[dict], list[dict]]:
             problem_clients.append(problem)
 
     write_report(custom_rows, platform_rows)
+
+    # Telegram уведомление
+    if problem_clients:
+        problems_text = "\n".join([
+            f"❌ {p['name']}: {', '.join(p['problems'].keys())}"
+            for p in problem_clients[:20]
+        ])
+        text = f"⚠️ Проблемы с интеграциями ({len(problem_clients)} клиентов):\n{problems_text}"
+        if len(problem_clients) > 20:
+            text += f"\n… и ещё {len(problem_clients) - 20}"
+        tg_send(text)
+    else:
+        tg_send("✅ Проверка интеграций прошла успешно. Проблем не обнаружено.")
     
     return custom_rows, platform_rows, problem_clients
