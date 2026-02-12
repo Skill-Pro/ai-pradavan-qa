@@ -27,11 +27,16 @@ SPREADSHEET_ID = "17Z5CGL5kI3b-5R2mRF8R3rRUbZkwDdhuY1kaAcWWKfs"
 INTEGRATION_ENDPOINTS = {
     "telegram": "/api/v1/integrations/telegram",
     "telegram_web": "/api/v1/integrations/telegram_web/status",
-    "whatsapp_business": "/api/v1/integrations/whatsapp",
-    "whatsapp_web": "/api/v1/integrations/whatsapp_web/status",
-    "instagram": "/api/v1/integrations/instagram/status",
     "waha": "/api/v1/integrations/waha/status",
-    "wazzup": "/api/v1/integrations/wazzup/status",
+    "instagram": "/api/v1/integrations/instagram/status",
+}
+
+# Маппинг ключей на человекочитаемые названия
+INTEGRATION_NAMES = {
+    "telegram": "Telegram",
+    "telegram_web": "Telegram-Web",
+    "waha": "Waha",
+    "instagram": "Instagram",
 }
 
 # ===============================
@@ -65,17 +70,17 @@ def tg_send(text: str) -> None:
 # 🔹 Вспомогательные функции
 # ===============================
 
-def load_clients() -> Dict[str, List[Tuple[str, str, str]]]:
+def load_clients() -> Dict[str, List[Tuple[str, str, str, List[str]]]]:
     """
     Загружает клиентов из файла с разделением по категориям.
     
     Returns:
-        Dict с ключами 'КАСТОМНЫЕ' и 'ПЛАТФОРМА', значения — списки (имя, логин, пароль)
+        Dict с ключами 'КАСТОМНЫЕ' и 'ПЛАТФОРМА', значения — списки (имя, логин, пароль, каналы)
     """
     if not CLIENT_DATA_PATH.exists():
         raise FileNotFoundError(f"Файл с клиентами не найден: {CLIENT_DATA_PATH}")
 
-    clients: Dict[str, List[Tuple[str, str, str]]] = {
+    clients: Dict[str, List[Tuple[str, str, str, List[str]]]] = {
         "КАСТОМНЫЕ": [],
         "ПЛАТФОРМА": []
     }
@@ -98,11 +103,12 @@ def load_clients() -> Dict[str, List[Tuple[str, str, str]]]:
                 continue
             
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 3:
-                print(f"⚠️ Пропущена строка (ожидалось 3 колонки): {line}")
+            if len(parts) < 4:
+                print(f"⚠️ Пропущена строка (ожидалось 4 колонки): {line}")
                 continue
             client_name, login, password = parts[0], parts[1], parts[2]
-            clients[current_category].append((client_name, login, password))
+            channels = [ch.strip() for ch in parts[3].split("|") if ch.strip()]
+            clients[current_category].append((client_name, login, password, channels))
     
     return clients
 
@@ -319,10 +325,7 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         "Логин",
         "Telegram",
         "Telegram-Web",
-        "WhatsApp Business",
-        "WhatsApp-Web",
         "WAHA",
-        "WAZZUP",
         "Instagram",
         "Статус",
     ]
@@ -414,9 +417,7 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         for idx, row in enumerate(custom_rows, 1):
             # Определяем статус
             statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""),
-                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""),
-                       row.get("WAHA", ""), row.get("WAZZUP", ""),
-                       row.get("Instagram", "")]
+                       row.get("WAHA", ""), row.get("Instagram", "")]
             if "❌" in statuses:
                 status = "⚠️ Есть проблемы"
             elif all(s == "✅" for s in statuses if s):
@@ -430,10 +431,7 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
                 row.get("Логин", ""),
                 row.get("Telegram", ""),
                 row.get("Telegram-Web", ""),
-                row.get("WhatsApp Business", ""),
-                row.get("WhatsApp-Web", ""),
                 row.get("WAHA", ""),
-                row.get("WAZZUP", ""),
                 row.get("Instagram", ""),
                 status,
             ])
@@ -447,9 +445,7 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
         for idx, row in enumerate(platform_rows, 1):
             # Определяем статус
             statuses = [row.get("Telegram", ""), row.get("Telegram-Web", ""),
-                       row.get("WhatsApp Business", ""), row.get("WhatsApp-Web", ""),
-                       row.get("WAHA", ""), row.get("WAZZUP", ""),
-                       row.get("Instagram", "")]
+                       row.get("WAHA", ""), row.get("Instagram", "")]
             if "❌" in statuses:
                 status = "⚠️ Есть проблемы"
             elif all(s == "✅" for s in statuses if s):
@@ -463,10 +459,7 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
                 row.get("Логин", ""),
                 row.get("Telegram", ""),
                 row.get("Telegram-Web", ""),
-                row.get("WhatsApp Business", ""),
-                row.get("WhatsApp-Web", ""),
                 row.get("WAHA", ""),
-                row.get("WAZZUP", ""),
                 row.get("Instagram", ""),
                 status,
             ])
@@ -515,9 +508,18 @@ def write_report(custom_rows: List[Dict[str, Any]], platform_rows: List[Dict[str
 # 🔹 Один общий тест
 # ===============================
 
-def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str, Any], Dict[str, Any] | None]:
+def check_client(client_name: str, login: str, password: str, channels: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any] | None]:
     """
-    Проверяет одного клиента и возвращает (row, problem или None)
+    Проверяет одного клиента только по указанным каналам.
+    
+    Args:
+        client_name: Название клиента
+        login: Логин
+        password: Пароль
+        channels: Список каналов для проверки (telegram, telegram_web, waha, instagram)
+    
+    Returns:
+        (row, problem или None)
     """
     headers, login_error = get_auth_headers(login, password)
 
@@ -526,14 +528,8 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
         row = {
             "Название клиента": client_name,
             "Логин": login,
-            "Пароль": password,
-            "Telegram": "❌",
-            "Telegram-Web": "❌",
-            "WhatsApp Business": "❌",
-            "WhatsApp-Web": "❌",
-            "WAHA": "❌",
-            "WAZZUP": "❌",
-            "Instagram": "❌",
+            "Каналы": ", ".join(channels),
+            "Статус": "❌ Ошибка логина",
             "Комментарий": comment,
         }
         problem = {
@@ -544,75 +540,53 @@ def check_client(client_name: str, login: str, password: str) -> Tuple[Dict[str,
         }
         return row, problem
 
-    telegram_emoji, telegram_status, telegram_msg = check_integration(
-        INTEGRATION_ENDPOINTS["telegram"], headers
-    )
-    telegram_web_emoji, telegram_web_status, telegram_web_msg = check_integration(
-        INTEGRATION_ENDPOINTS["telegram_web"], headers
-    )
-    whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg = check_integration(
-        INTEGRATION_ENDPOINTS["whatsapp_business"], headers
-    )
-    whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg = check_integration(
-        INTEGRATION_ENDPOINTS["whatsapp_web"], headers
-    )
-    instagram_emoji, instagram_status, instagram_msg = check_integration(
-        INTEGRATION_ENDPOINTS["instagram"], headers
-    )
-    waha_emoji, waha_status, waha_msg = check_integration(
-        INTEGRATION_ENDPOINTS["waha"], headers
-    )
-    wazzup_emoji, wazzup_status, wazzup_msg = check_integration(
-        INTEGRATION_ENDPOINTS["wazzup"], headers
-    )
+    # Проверяем только указанные каналы
+    results = {}
+    problems = {}
+    comment_lines = []
+    
+    for channel in channels:
+        if channel not in INTEGRATION_ENDPOINTS:
+            continue
+        
+        emoji, status, msg = check_integration(INTEGRATION_ENDPOINTS[channel], headers)
+        channel_name = INTEGRATION_NAMES.get(channel, channel)
+        results[channel] = emoji
+        comment_lines.append(build_integration_comment(channel_name, emoji, status, msg))
+        
+        if emoji == "❌":
+            problems[channel_name] = msg or "ошибка"
 
-    comment_lines = [
-        build_integration_comment("Telegram", telegram_emoji, telegram_status, telegram_msg),
-        build_integration_comment("Telegram-Web", telegram_web_emoji, telegram_web_status, telegram_web_msg),
-        build_integration_comment("WhatsApp Business", whatsapp_business_emoji, whatsapp_business_status, whatsapp_business_msg),
-        build_integration_comment("WhatsApp Web", whatsapp_web_emoji, whatsapp_web_status, whatsapp_web_msg),
-        build_integration_comment("WAHA", waha_emoji, waha_status, waha_msg),
-        build_integration_comment("WAZZUP", wazzup_emoji, wazzup_status, wazzup_msg),
-        build_integration_comment("Instagram", instagram_emoji, instagram_status, instagram_msg),
-    ]
     comment = "\n".join(comment_lines)
+    
+    # Определяем общий статус
+    all_emojis = list(results.values())
+    if "❌" in all_emojis:
+        overall_status = "❌ Есть проблемы"
+    elif all(e == "✅" for e in all_emojis):
+        overall_status = "✅ Всё работает"
+    else:
+        overall_status = "⚠️ Частично"
 
     row = {
         "Название клиента": client_name,
         "Логин": login,
-        "Пароль": password,
-        "Telegram": telegram_emoji,
-        "Telegram-Web": telegram_web_emoji,
-        "WhatsApp Business": whatsapp_business_emoji,
-        "WhatsApp-Web": whatsapp_web_emoji,
-        "WAHA": waha_emoji,
-        "WAZZUP": wazzup_emoji,
-        "Instagram": instagram_emoji,
+        "Каналы": ", ".join([INTEGRATION_NAMES.get(ch, ch) for ch in channels]),
+        "Статус": overall_status,
         "Комментарий": comment,
     }
-
-    # Проверяем на проблемы (❌)
-    problems = {}
-    if telegram_emoji == "❌":
-        problems["Telegram"] = telegram_msg or "ошибка"
-    if telegram_web_emoji == "❌":
-        problems["Telegram-Web"] = telegram_web_msg or "ошибка"
-    if whatsapp_business_emoji == "❌":
-        problems["WhatsApp Business"] = whatsapp_business_msg or "ошибка"
-    if whatsapp_web_emoji == "❌":
-        problems["WhatsApp-Web"] = whatsapp_web_msg or "ошибка"
-    if waha_emoji == "❌":
-        problems["WAHA"] = waha_msg or "ошибка"
-    if wazzup_emoji == "❌":
-        problems["WAZZUP"] = wazzup_msg or "ошибка"
-    if instagram_emoji == "❌":
-        problems["Instagram"] = instagram_msg or "ошибка"
+    
+    # Добавляем результаты по каждому каналу
+    for channel in channels:
+        channel_name = INTEGRATION_NAMES.get(channel, channel)
+        row[channel_name] = results.get(channel, "—")
     
     problem = None
     if problems:
         problem = {
             "name": client_name,
             "login": login,
+            "channels": channels,
             "problems": problems,
             "comment": comment
         }
@@ -637,17 +611,17 @@ def test_integration_status_report():
     idx = 0
     
     # Проверяем кастомных
-    for client_name, login, password in custom_clients:
+    for client_name, login, password, channels in custom_clients:
         idx += 1
-        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login})")
-        row, _ = check_client(client_name, login, password)
+        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login}) -> {channels}")
+        row, _ = check_client(client_name, login, password, channels)
         custom_rows.append(row)
     
     # Проверяем платформенных
-    for client_name, login, password in platform_clients:
+    for client_name, login, password, channels in platform_clients:
         idx += 1
-        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login})")
-        row, _ = check_client(client_name, login, password)
+        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login}) -> {channels}")
+        row, _ = check_client(client_name, login, password, channels)
         platform_rows.append(row)
 
     write_report(custom_rows, platform_rows)
@@ -677,19 +651,19 @@ def run_integration_check() -> tuple[list[dict], list[dict], list[dict]]:
     idx = 0
     
     # Проверяем кастомных
-    for client_name, login, password in custom_clients:
+    for client_name, login, password, channels in custom_clients:
         idx += 1
-        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login})")
-        row, problem = check_client(client_name, login, password)
+        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login}) -> {channels}")
+        row, problem = check_client(client_name, login, password, channels)
         custom_rows.append(row)
         if problem:
             problem_clients.append(problem)
     
     # Проверяем платформенных
-    for client_name, login, password in platform_clients:
+    for client_name, login, password, channels in platform_clients:
         idx += 1
-        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login})")
-        row, problem = check_client(client_name, login, password)
+        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login}) -> {channels}")
+        row, problem = check_client(client_name, login, password, channels)
         platform_rows.append(row)
         if problem:
             problem_clients.append(problem)
