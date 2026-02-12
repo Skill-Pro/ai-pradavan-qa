@@ -8,6 +8,8 @@ services:
     build: .
     container_name: integration-monitor
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - TZ=Asia/Almaty
     volumes:
