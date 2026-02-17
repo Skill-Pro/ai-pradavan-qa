@@ -191,6 +191,7 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
     date_str = now.strftime('%d.%m.%Y')
     
     lines = [f"📊 Отчет интеграций | {date_str} {time_str}", ""]
+    has_problems = False
     
     # КАСТОМНЫЕ
     if custom_rows:
@@ -198,18 +199,23 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
         lines.append(f"📦 КАСТОМНЫЕ ({len(custom_rows)} клиентов, ✅ {ok_count}):")
         for row in custom_rows:
             name = row.get("Название клиента", "?")
+            login = row.get("Логин", "?")
             # Собираем статусы каналов
             channels = []
+            row_has_error = False
             for ch in ["Telegram", "Telegram-Web", "WAHA", "Instagram"]:
                 val = row.get(ch, "")
                 if val == "✅":
                     channels.append(f"{ch}✅")
-                elif val == "—":
-                    channels.append(f"{ch}—")
                 elif val == "❌":
                     channels.append(f"{ch}❌")
+                    row_has_error = True
+                    has_problems = True
             if channels:
-                lines.append(f"  • {name}: {', '.join(channels)}")
+                line = f"  • {name}: {', '.join(channels)}"
+                if row_has_error:
+                    line += f"\n    📧 {login}"
+                lines.append(line)
         lines.append("")
     
     # ПЛАТФОРМА
@@ -218,17 +224,27 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
         lines.append(f"🌐 ПЛАТФОРМА ({len(platform_rows)} клиентов, ✅ {ok_count}):")
         for row in platform_rows:
             name = row.get("Название клиента", "?")
+            login = row.get("Логин", "?")
             channels = []
+            row_has_error = False
             for ch in ["Telegram", "Telegram-Web", "WAHA", "Instagram"]:
                 val = row.get(ch, "")
                 if val == "✅":
                     channels.append(f"{ch}✅")
-                elif val == "—":
-                    channels.append(f"{ch}—")
                 elif val == "❌":
                     channels.append(f"{ch}❌")
+                    row_has_error = True
+                    has_problems = True
             if channels:
-                lines.append(f"  • {name}: {', '.join(channels)}")
+                line = f"  • {name}: {', '.join(channels)}"
+                if row_has_error:
+                    line += f"\n    📧 {login}"
+                lines.append(line)
+    
+    # Тег если есть проблемы
+    if has_problems:
+        lines.append("")
+        lines.append("👤 @FunAlish")
     
     text = "\n".join(lines)
     
