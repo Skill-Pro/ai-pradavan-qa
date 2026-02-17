@@ -35,7 +35,7 @@ INTEGRATION_ENDPOINTS = {
 INTEGRATION_NAMES = {
     "telegram": "Telegram",
     "telegram_web": "Telegram-Web",
-    "waha": "Waha",
+    "waha": "WAHA",
     "instagram": "Instagram",
 }
 
