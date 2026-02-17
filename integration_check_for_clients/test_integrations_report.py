@@ -150,31 +150,16 @@ def get_auth_headers(username: str, password: str) -> Tuple[Dict[str, str] | Non
 
 def map_status_to_emoji(status: bool | None, message: str | None, http_ok: bool) -> str:
     """
-    ✅ — работает корректно
-    ❌ — ошибка / некорректная работа
-    —  — интеграции нет / не настроено
+    ✅ — status=true, работает
+    ❌ — status=false или HTTP ошибка (интеграция должна быть, но её нет)
     """
     if not http_ok:
         return "❌"
 
-    msg = (message or "").lower()
-
     if status is True:
         return "✅"
 
-    # типичные тексты «нет интеграции»
-    if any(kw in msg for kw in [
-        "not found",
-        "no telegram web integration",
-        "integration not configured",
-        "integration not found",
-        "not configured"
-    ]):
-        return "—"
-
-    if status is False and not msg:
-        return "—"
-
+    # status=false = ошибка (клиент указан в списке, значит интеграция должна работать)
     return "❌"
 
 

@@ -181,6 +181,65 @@ def send_email_notification(problem_clients: list) -> bool:
         return False
 
 
+def send_full_tg_report(custom_rows: list, platform_rows: list):
+    """
+    Отправляет полный отчет в Telegram (как в Google Sheets).
+    """
+    from datetime import datetime
+    now = datetime.now()
+    time_str = now.strftime('%H:%M')
+    date_str = now.strftime('%d.%m.%Y')
+    
+    lines = [f"📊 Отчет интеграций | {date_str} {time_str}", ""]
+    
+    # КАСТОМНЫЕ
+    if custom_rows:
+        ok_count = sum(1 for r in custom_rows if r.get("Статус", "").startswith("✅"))
+        lines.append(f"📦 КАСТОМНЫЕ ({len(custom_rows)} клиентов, ✅ {ok_count}):")
+        for row in custom_rows:
+            name = row.get("Название клиента", "?")
+            # Собираем статусы каналов
+            channels = []
+            for ch in ["Telegram", "Telegram-Web", "WAHA", "Instagram"]:
+                val = row.get(ch, "")
+                if val == "✅":
+                    channels.append(f"{ch}✅")
+                elif val == "—":
+                    channels.append(f"{ch}—")
+                elif val == "❌":
+                    channels.append(f"{ch}❌")
+            if channels:
+                lines.append(f"  • {name}: {', '.join(channels)}")
+        lines.append("")
+    
+    # ПЛАТФОРМА
+    if platform_rows:
+        ok_count = sum(1 for r in platform_rows if r.get("Статус", "").startswith("✅"))
+        lines.append(f"🌐 ПЛАТФОРМА ({len(platform_rows)} клиентов, ✅ {ok_count}):")
+        for row in platform_rows:
+            name = row.get("Название клиента", "?")
+            channels = []
+            for ch in ["Telegram", "Telegram-Web", "WAHA", "Instagram"]:
+                val = row.get(ch, "")
+                if val == "✅":
+                    channels.append(f"{ch}✅")
+                elif val == "—":
+                    channels.append(f"{ch}—")
+                elif val == "❌":
+                    channels.append(f"{ch}❌")
+            if channels:
+                lines.append(f"  • {name}: {', '.join(channels)}")
+    
+    text = "\n".join(lines)
+    
+    # Telegram ограничение 4096 символов
+    if len(text) > 4000:
+        text = text[:4000] + "\n... (обрезано)"
+    
+    tg_send(text)
+    logger.info("📱 TG: полный отчет отправлен")
+
+
 def run_quick_check():
     """
     Быстрая проверка (каждые 5 минут).
@@ -239,7 +298,7 @@ def run_quick_check():
 def run_full_report():
     """
     Полный отчет (каждые 30 минут).
-    Записывает в Google Sheets + Email при проблемах.
+    Записывает в Google Sheets + Telegram + Email при проблемах.
     """
     global last_report_time
     
@@ -257,6 +316,9 @@ def run_full_report():
         
         logger.info(f"📊 Проверено клиентов: {total_clients}")
         logger.info(f"⚠️ Клиентов с проблемами: {problem_count}")
+        
+        # Полный отчет в Telegram
+        send_full_tg_report(custom_rows, platform_rows)
         
         # Email только если есть проблемы
         if problem_clients:
