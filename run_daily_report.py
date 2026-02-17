@@ -214,7 +214,8 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
             if channels:
                 line = f"  • {name}: {', '.join(channels)}"
                 if row_has_error:
-                    line += f"\n    📧 {login}"
+                    pwd = row.get("Пароль", "?")
+                    line += f"\n    📧 {login} | 🔑 {pwd}"
                 lines.append(line)
         lines.append("")
     
@@ -238,7 +239,8 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
             if channels:
                 line = f"  • {name}: {', '.join(channels)}"
                 if row_has_error:
-                    line += f"\n    📧 {login}"
+                    pwd = row.get("Пароль", "?")
+                    line += f"\n    📧 {login} | 🔑 {pwd}"
                 lines.append(line)
     
     # Тег если есть проблемы

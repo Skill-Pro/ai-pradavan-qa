@@ -557,6 +557,7 @@ def check_client(client_name: str, login: str, password: str, channels: List[str
     row = {
         "Название клиента": client_name,
         "Логин": login,
+        "Пароль": password,
         "Каналы": ", ".join([INTEGRATION_NAMES.get(ch, ch) for ch in channels]),
         "Статус": overall_status,
         "Комментарий": comment,
