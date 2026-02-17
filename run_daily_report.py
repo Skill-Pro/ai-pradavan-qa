@@ -276,7 +276,7 @@ def run_quick_check():
                     f"🆕 {p['name']}: {', '.join(p['problems'].keys())}\n   📧 {p['login']} | 🔑 {p.get('password', '?')}"
                     for p in new_problem_clients[:15]
                 ])
-                text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}"
+                text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}\n\n👤 @FunAlish"
                 tg_send(text)
                 logger.info(f"📱 TG: отправлено уведомление о {len(new_problem_clients)} новых проблемах")
         
