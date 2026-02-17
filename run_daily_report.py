@@ -273,7 +273,7 @@ def run_quick_check():
             
             if new_problem_clients:
                 problems_text = "\n".join([
-                    f"🆕 {p['name']}: {', '.join(p['problems'].keys())}"
+                    f"🆕 {p['name']}: {', '.join(p['problems'].keys())}\n   📧 {p['login']} | 🔑 {p.get('password', '?')}"
                     for p in new_problem_clients[:15]
                 ])
                 text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}"

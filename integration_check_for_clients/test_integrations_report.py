@@ -520,6 +520,7 @@ def check_client(client_name: str, login: str, password: str, channels: List[str
         problem = {
             "name": client_name,
             "login": login,
+            "password": password,
             "problems": {"Авторизация": "Ошибка логина"},
             "comment": comment
         }
@@ -571,6 +572,7 @@ def check_client(client_name: str, login: str, password: str, channels: List[str
         problem = {
             "name": client_name,
             "login": login,
+            "password": password,
             "channels": channels,
             "problems": problems,
             "comment": comment
