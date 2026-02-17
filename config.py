@@ -1,25 +1,27 @@
 # config.py
 # Конфигурация для мониторинга интеграций
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ===============================
-# 🔹 SMTP настройки (Gmail)
+# 🔹 SMTP настройки (из .env)
 # ===============================
 SMTP_CONFIG = {
-    "server": "smtp.gmail.com",
-    "port": 465,
-    "use_ssl": True,
-    "login": "helloworldnurik@gmail.com",
-    "password": "pkze pexq ehnj beor",
+    "server": os.getenv("SMTP_SERVER", "smtp.gmail.com"),
+    "port": int(os.getenv("SMTP_PORT", "465")),
+    "use_ssl": os.getenv("SMTP_USE_SSL", "true").lower() == "true",
+    "login": os.getenv("SMTP_LOGIN", ""),
+    "password": os.getenv("SMTP_PASSWORD", ""),
 }
 
 # ===============================
-# 🔹 Получатели уведомлений
+# 🔹 Получатели уведомлений (из .env)
 # ===============================
-EMAIL_RECIPIENTS = [
-    "dauren.khan05@gmail.com",
-    "mturganbay13@gmail.com",
-    "helloworldnurik@gmail.com"
-]
+_recipients = os.getenv("EMAIL_RECIPIENTS", "")
+EMAIL_RECIPIENTS = [e.strip() for e in _recipients.split(",") if e.strip()]
 
 # ===============================
 # 🔹 Настройки мониторинга
