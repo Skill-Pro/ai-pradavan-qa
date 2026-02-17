@@ -627,6 +627,51 @@ def test_integration_status_report():
     write_report(custom_rows, platform_rows)
 
 
+def run_integration_check_silent() -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    Запускает проверку интеграций БЕЗ автоматической отправки в Telegram.
+    Используется для частых проверок, где TG контролируется извне.
+    
+    Returns:
+        tuple: (custom_rows, platform_rows, problem_clients)
+    """
+    clients_by_category = load_clients()
+    
+    custom_clients = clients_by_category.get("КАСТОМНЫЕ", [])
+    platform_clients = clients_by_category.get("ПЛАТФОРМА", [])
+    total = len(custom_clients) + len(platform_clients)
+    
+    if total == 0:
+        print("⚠️ Нет ни одного клиента в client_data.txt")
+        return [], [], []
+
+    custom_rows: List[Dict[str, Any]] = []
+    platform_rows: List[Dict[str, Any]] = []
+    problem_clients: List[Dict[str, Any]] = []
+    
+    idx = 0
+    
+    # Проверяем кастомных
+    for client_name, login, password, channels in custom_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [КАСТОМНЫЕ] {client_name} ({login}) -> {channels}")
+        row, problem = check_client(client_name, login, password, channels)
+        custom_rows.append(row)
+        if problem:
+            problem_clients.append(problem)
+    
+    # Проверяем платформенных
+    for client_name, login, password, channels in platform_clients:
+        idx += 1
+        print(f"[{idx}/{total}] [ПЛАТФОРМА] {client_name} ({login}) -> {channels}")
+        row, problem = check_client(client_name, login, password, channels)
+        platform_rows.append(row)
+        if problem:
+            problem_clients.append(problem)
+    
+    return custom_rows, platform_rows, problem_clients
+
+
 def run_integration_check() -> tuple[list[dict], list[dict], list[dict]]:
     """
     Запускает проверку интеграций и возвращает результаты.

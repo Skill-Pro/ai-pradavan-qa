@@ -1,7 +1,11 @@
 """
 Скрипт мониторинга интеграций клиентов.
-Запускается каждые 30 минут в рабочие часы (9:00 - 00:00).
-При обнаружении проблем отправляет email уведомления.
+
+Логика работы:
+- Проверка каждые 5 минут
+- При новых ошибках — мгновенное уведомление в Telegram
+- Полный отчет в Google Sheets + Email — каждые 30 минут
+- Если всё ОК — тишина (не спамим)
 """
 
 import time
@@ -10,6 +14,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from typing import Set, Dict, Any
 
 try:
     import pytz
@@ -20,12 +25,17 @@ except ImportError:
 from config import (
     SMTP_CONFIG,
     EMAIL_RECIPIENTS,
-    CHECK_INTERVAL_MINUTES,
+    QUICK_CHECK_INTERVAL_MINUTES,
+    REPORT_INTERVAL_MINUTES,
     WORK_HOURS_START,
     WORK_HOURS_END,
     TIMEZONE,
 )
-from integration_check_for_clients.test_integrations_report import run_integration_check
+from integration_check_for_clients.test_integrations_report import (
+    run_integration_check_silent,
+    write_report,
+    tg_send,
+)
 
 # ===============================
 # 🔹 Настройка логирования
@@ -40,30 +50,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Хранилище предыдущих проблем (для отслеживания изменений)
+previous_problems: Set[str] = set()
+last_report_time: datetime = datetime.min
+
+
+def get_current_time() -> datetime:
+    """Получить текущее время в нужном часовом поясе."""
+    if HAS_PYTZ:
+        tz = pytz.timezone(TIMEZONE)
+        return datetime.now(tz)
+    return datetime.now()
+
 
 def get_current_hour() -> int:
     """Получить текущий час в нужном часовом поясе."""
-    if HAS_PYTZ:
-        tz = pytz.timezone(TIMEZONE)
-        now = datetime.now(tz)
-    else:
-        now = datetime.now()
-    return now.hour
+    return get_current_time().hour
 
 
 def is_working_hours() -> bool:
     """Проверить, находимся ли в рабочих часах."""
     hour = get_current_hour()
-    # Если WORK_HOURS_END = 24, то работаем с 9:00 до 23:59
     if WORK_HOURS_END == 24:
         return hour >= WORK_HOURS_START
     return WORK_HOURS_START <= hour < WORK_HOURS_END
 
 
+def problems_to_keys(problem_clients: list) -> Set[str]:
+    """Преобразовать список проблем в множество ключей для сравнения."""
+    keys = set()
+    for p in problem_clients:
+        name = p.get("name", "")
+        for integration in p.get("problems", {}).keys():
+            keys.add(f"{name}:{integration}")
+    return keys
+
+
 def send_email_notification(problem_clients: list) -> bool:
-    """
-    Отправить email уведомление о проблемных клиентах.
-    """
+    """Отправить email уведомление о проблемных клиентах."""
     if not problem_clients:
         return True
     
@@ -75,7 +99,6 @@ def send_email_notification(problem_clients: list) -> bool:
     date_str = now.strftime('%d.%m.%Y')
     time_str = now.strftime('%H:%M')
     
-    # Формируем HTML письмо
     subject = f"⚠️ Проблемы с интеграциями | {date_str} {time_str}"
     
     html_body = f"""
@@ -133,13 +156,10 @@ def send_email_notification(problem_clients: list) -> bool:
     </html>
     """
 
-    # Создаем письмо
     msg = MIMEMultipart("alternative")
     msg["From"] = SMTP_CONFIG["login"]
     msg["To"] = ", ".join(EMAIL_RECIPIENTS)
     msg["Subject"] = subject
-    
-    # Добавляем HTML версию
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
@@ -161,63 +181,137 @@ def send_email_notification(problem_clients: list) -> bool:
         return False
 
 
-def run_check_cycle():
-    """Выполнить один цикл проверки."""
-    logger.info("=" * 60)
-    logger.info("🚀 Запуск проверки интеграций...")
+def run_quick_check():
+    """
+    Быстрая проверка (каждые 5 минут).
+    Отправляет в Telegram только при НОВЫХ проблемах.
+    """
+    global previous_problems
+    
+    logger.info("-" * 40)
+    logger.info("🔍 Быстрая проверка...")
     
     try:
-        # Запускаем проверку и получаем результаты
-        custom_rows, platform_rows, problem_clients = run_integration_check()
+        custom_rows, platform_rows, problem_clients = run_integration_check_silent()
         
         total_clients = len(custom_rows) + len(platform_rows)
         problem_count = len(problem_clients)
         
+        logger.info(f"📊 Проверено: {total_clients} | Проблем: {problem_count}")
+        
+        # Сравниваем с предыдущими проблемами
+        current_problems = problems_to_keys(problem_clients)
+        new_problems = current_problems - previous_problems
+        fixed_problems = previous_problems - current_problems
+        
+        # Уведомляем только о НОВЫХ проблемах
+        if new_problems:
+            new_problem_clients = [
+                p for p in problem_clients
+                if any(f"{p['name']}:{integ}" in new_problems 
+                       for integ in p.get("problems", {}).keys())
+            ]
+            
+            if new_problem_clients:
+                problems_text = "\n".join([
+                    f"🆕 {p['name']}: {', '.join(p['problems'].keys())}"
+                    for p in new_problem_clients[:15]
+                ])
+                text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}"
+                tg_send(text)
+                logger.info(f"📱 TG: отправлено уведомление о {len(new_problem_clients)} новых проблемах")
+        
+        # Уведомляем о восстановленных (опционально)
+        if fixed_problems and not current_problems:
+            tg_send("✅ Все интеграции восстановлены!")
+            logger.info("📱 TG: все проблемы исправлены")
+        
+        # Обновляем состояние
+        previous_problems = current_problems
+        
+        return custom_rows, platform_rows, problem_clients
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка быстрой проверки: {e}")
+        return [], [], []
+
+
+def run_full_report():
+    """
+    Полный отчет (каждые 30 минут).
+    Записывает в Google Sheets + Email при проблемах.
+    """
+    global last_report_time
+    
+    logger.info("=" * 60)
+    logger.info("📋 Полный отчет...")
+    
+    try:
+        custom_rows, platform_rows, problem_clients = run_integration_check_silent()
+        
+        total_clients = len(custom_rows) + len(platform_rows)
+        problem_count = len(problem_clients)
+        
+        # Записываем в Google Sheets
+        write_report(custom_rows, platform_rows)
+        
         logger.info(f"📊 Проверено клиентов: {total_clients}")
         logger.info(f"⚠️ Клиентов с проблемами: {problem_count}")
         
+        # Email только если есть проблемы
         if problem_clients:
-            logger.info("📧 Отправка уведомлений...")
+            logger.info("📧 Отправка email...")
             send_email_notification(problem_clients)
         else:
             logger.info("✅ Все интеграции работают корректно")
         
-        logger.info("✅ Проверка завершена")
+        last_report_time = get_current_time()
+        logger.info("✅ Полный отчет завершен")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка при проверке: {e}")
-        # Попробуем отправить уведомление об ошибке
-        try:
-            error_client = [{
-                "name": "SYSTEM ERROR",
-                "login": "N/A",
-                "problems": {"Ошибка системы": str(e)},
-                "comment": "Ошибка при выполнении проверки интеграций"
-            }]
-            send_email_notification(error_client)
-        except:
-            pass
+        logger.error(f"❌ Ошибка полного отчета: {e}")
+
+
+def should_run_full_report() -> bool:
+    """Проверить, пора ли делать полный отчет."""
+    global last_report_time
+    now = get_current_time()
+    
+    # Первый запуск
+    if last_report_time == datetime.min:
+        return True
+    
+    # Прошло достаточно времени
+    elapsed_minutes = (now - last_report_time).total_seconds() / 60
+    return elapsed_minutes >= REPORT_INTERVAL_MINUTES
 
 
 def main():
     """Основной цикл мониторинга."""
+    global last_report_time
+    
     logger.info("=" * 60)
     logger.info("🔄 Запуск сервиса мониторинга интеграций")
-    logger.info(f"⏰ Интервал проверки: {CHECK_INTERVAL_MINUTES} минут")
+    logger.info(f"⚡ Быстрая проверка: каждые {QUICK_CHECK_INTERVAL_MINUTES} мин")
+    logger.info(f"📋 Полный отчет: каждые {REPORT_INTERVAL_MINUTES} мин")
     logger.info(f"🕐 Рабочие часы: {WORK_HOURS_START}:00 - {WORK_HOURS_END}:00")
     logger.info(f"📧 Получатели: {', '.join(EMAIL_RECIPIENTS)}")
     logger.info("=" * 60)
     
     while True:
         if is_working_hours():
-            run_check_cycle()
+            # Определяем тип проверки
+            if should_run_full_report():
+                run_full_report()
+            else:
+                run_quick_check()
         else:
             hour = get_current_hour()
             logger.info(f"💤 Вне рабочих часов ({hour}:00). Ожидание...")
         
         # Ждём до следующей проверки
-        sleep_seconds = CHECK_INTERVAL_MINUTES * 60
-        logger.info(f"⏳ Следующая проверка через {CHECK_INTERVAL_MINUTES} минут...")
+        sleep_seconds = QUICK_CHECK_INTERVAL_MINUTES * 60
+        logger.info(f"⏳ Следующая проверка через {QUICK_CHECK_INTERVAL_MINUTES} мин...")
         time.sleep(sleep_seconds)
 
 
