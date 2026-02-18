@@ -243,11 +243,6 @@ def send_full_tg_report(custom_rows: list, platform_rows: list):
                     line += f"\n    📧 {login} | 🔑 {pwd}"
                 lines.append(line)
     
-    # Тег если есть проблемы
-    if has_problems:
-        lines.append("")
-        lines.append("👤 @FunAlish")
-    
     text = "\n".join(lines)
     
     # Telegram ограничение 4096 символов
@@ -294,7 +289,7 @@ def run_quick_check():
                     f"🆕 {p['name']}: {', '.join(p['problems'].keys())}\n   📧 {p['login']} | 🔑 {p.get('password', '?')}"
                     for p in new_problem_clients[:15]
                 ])
-                text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}\n\n👤 @FunAlish"
+                text = f"🚨 НОВЫЕ проблемы ({len(new_problem_clients)}):\n{problems_text}"
                 tg_send(text)
                 logger.info(f"📱 TG: отправлено уведомление о {len(new_problem_clients)} новых проблемах")
         
