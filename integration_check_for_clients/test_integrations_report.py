@@ -28,6 +28,7 @@ INTEGRATION_ENDPOINTS = {
     "telegram": "/api/v1/integrations/telegram",
     "telegram_web": "/api/v1/integrations/telegram_web/status",
     "waha": "/api/v1/integrations/waha/status",
+    "wazzup": "/api/v1/integrations/wazzup/status",
     "instagram": "/api/v1/integrations/instagram/status",
 }
 
@@ -36,6 +37,7 @@ INTEGRATION_NAMES = {
     "telegram": "Telegram",
     "telegram_web": "Telegram-Web",
     "waha": "WAHA",
+    "wazzup": "WAZZUP",
     "instagram": "Instagram",
 }
 
